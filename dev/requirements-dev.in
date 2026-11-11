@@ -1,0 +1,5 @@
+# Development / external-evaluation extras (public data only). Pinned in dev/requirements-dev.txt via:
+#   uv pip compile dev/requirements-dev.in -o dev/requirements-dev.txt --python-version 3.12
+-r ../solution/requirements.in
+kloppy
+pytest

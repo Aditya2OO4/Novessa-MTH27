@@ -1,0 +1,6 @@
+# Direct runtime dependencies of the submission pipeline. Pinned (with all transitive deps) in
+# solution/requirements.txt via:  uv pip compile solution/requirements.in -o solution/requirements.txt --python-version 3.12
+numpy
+pandas
+lightgbm
+torch==2.11.0  # the version models/gru.pt was trained and verified with
