@@ -16,7 +16,9 @@ Compared on the degraded held-out match:
 """
 
 import argparse
+import concurrent.futures
 import itertools
+import json
 import os
 import sys
 import time
@@ -35,7 +37,7 @@ PITCH = (105.0, 68.0)
 LGB_PARAMS = dict(objective="multiclass", num_class=3, learning_rate=0.05, num_leaves=63,
                   min_data_in_leaf=200, feature_fraction=0.8, bagging_fraction=0.8,
                   bagging_freq=1, lambda_l2=1.0, verbose=-1, seed=0, deterministic=True,
-                  force_row_wise=True, num_threads=4)
+                  force_row_wise=True, num_threads=os.cpu_count() or 4)
 N_ROUNDS = 400
 SUB = 5          # train on every 5th frame (frames are strongly autocorrelated)
 
@@ -88,10 +90,13 @@ def nearest_smooth(codes, w, graded):
 
 
 # ------------------------------------------------------------------- batched Viterbi grid
-GRID = dict(w=(0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0),
-            p_turnover=(1e-4, 3e-4, 1e-3, 3e-3, 1e-2),
-            p_enter_dead=(3e-4, 1e-3, 3e-3, 1e-2),
-            p_leave_dead=(1e-3, 3e-3, 1e-2, 3e-2))
+# The first grid's optimum sat on its edges; wider grids keep hitting edges because w and the
+# transition probabilities trade off along a ridge (lower w ~ stickier). The score is flat along it
+# (0.519 -> 0.526 spellF1 from 240 to 875 configs, within noise): the HMM is tuned out.
+GRID = dict(w=(0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1.0),
+            p_turnover=(3e-3, 1e-2, 3e-2, 1e-1, 2e-1),
+            p_enter_dead=(1e-5, 3e-5, 1e-4, 3e-4, 1e-3),
+            p_leave_dead=(1e-5, 3e-5, 1e-4, 3e-4, 1e-3))
 
 
 def grid_configs():
@@ -118,9 +123,9 @@ def batched_viterbi(base, weights, log_trans):
     return paths
 
 
-def grid_labels(proba, prior, blocks, n):
-    """All grid configs decoded at once: (G, n) array of letters."""
-    cfgs = grid_configs()
+def grid_labels(proba, prior, blocks, n, cfgs=None):
+    """Grid configs (all by default) decoded at once: (G, n) array of letters."""
+    cfgs = grid_configs() if cfgs is None else cfgs
     weights = np.array([c["w"] for c in cfgs])
     trans = np.stack([model.transition_log_matrix(model.Config(
         p_turnover=c["p_turnover"], p_enter_dead=c["p_enter_dead"],
@@ -131,6 +136,59 @@ def grid_labels(proba, prior, blocks, n):
         paths = batched_viterbi(base[live:last + 1], weights, trans)
         out[:, live:last + 1] = model.LETTERS[paths]
     return out, cfgs
+
+
+def _score_chunk(args):
+    """Worker: decode a subset of grid configs on one match and score each (official metric)."""
+    proba, prior, blocks, gt, cfgs = args
+    labs, _ = grid_labels(proba, prior, blocks, len(gt), cfgs)
+    return np.array([metrics.evaluate(gt, l)["spell_f1"] for l in labs])
+
+
+def grid_scores_parallel(jobs, n_chunks):
+    """jobs: {mid: (proba, prior, blocks, gt)} -> ({mid: spellF1 per grid config}, configs)."""
+    cfgs = grid_configs()
+    chunks = np.array_split(np.arange(len(cfgs)), n_chunks)
+    tasks = [(mid, ci) for mid in jobs for ci in range(len(chunks))]
+    out = {mid: [None] * len(chunks) for mid in jobs}
+    workers = max(1, min(len(tasks), (os.cpu_count() or 2) - 1))
+    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(_score_chunk, jobs[mid] + ([cfgs[i] for i in chunks[ci]],)): (mid, ci)
+                for mid, ci in tasks}
+        for f in concurrent.futures.as_completed(futs):
+            mid, ci = futs[f]
+            out[mid][ci] = f.result()
+    return {mid: np.concatenate(v) for mid, v in out.items()}, cfgs
+
+
+def absorb_short(labels, max_frames):
+    """Possession-definition cleanup of the TRAINING target (never applied to the challenge match).
+
+    CHALLENGE.md: a change of possession needs *controlled* possession; "a simple touch of the ball
+    without control" and "a deflection of a pass that does not intercept it" do not count, and "a
+    player keeps the ball for a few seconds" is suggested as a proxy for control. DFL's
+    BallPossession flips on such touches. So an opponent spell shorter than max_frames that sits
+    between two spells of the same team (no dead ball in between) is given back to that team.
+    Spells next to a dead ball or a half boundary are kept: they start or end a restart.
+    """
+    lab = labels.copy()
+    if max_frames <= 0:
+        return lab
+    while True:
+        change = np.flatnonzero(lab[1:] != lab[:-1]) + 1
+        starts = np.concatenate([[0], change])
+        ends = np.concatenate([change, [len(lab)]])
+        vals = lab[starts]
+        changed = False
+        for i in range(1, len(starts) - 1):
+            v, prev, nxt = vals[i], vals[i - 1], vals[i + 1]
+            if (v in ("H", "A") and prev == nxt and prev in ("H", "A") and prev != v
+                    and ends[i] - starts[i] < max_frames):
+                lab[starts[i]:ends[i]] = prev
+                vals[i] = prev
+                changed = True
+        if not changed:
+            return lab
 
 
 # ------------------------------------------------------------------- main
@@ -173,6 +231,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--matches", nargs="*", default=MATCH_IDS)
     ap.add_argument("--save", default=None, help="fit on all matches and save booster here")
+    ap.add_argument("--absorb", type=float, default=0.0,
+                    help="EXPERIMENTAL, keep 0: give back opponent spells shorter than this many seconds "
+                         "(see absorb_short). The organisers' ground truth keeps sub-2 s spells.")
+    ap.add_argument("--chunks", type=int, default=3, help="grid chunks per match (parallelism)")
     args = ap.parse_args()
     cache_dir = os.path.join(idsse.DEFAULT_DIR, "cache")
     print("metric:", "OFFICIAL possession_metrics" if metrics.OFFICIAL else
@@ -182,7 +244,11 @@ def main():
     for mid in args.matches:
         t = time.time()
         data[mid] = prepare(mid, cache_dir)
-        print("prepared {} in {:.0f}s".format(mid, time.time() - t), flush=True)
+        raw = data[mid]["gt"]
+        data[mid]["gt_raw"] = raw
+        data[mid]["gt"] = absorb_short(raw, int(round(args.absorb * 25)))
+        print("prepared {} in {:.0f}s  (absorb {:.1f}s relabelled {} frames)".format(
+            mid, time.time() - t, args.absorb, int((data[mid]["gt"] != raw).sum())), flush=True)
 
     # ---- out-of-fold classifier probabilities -------------------------------------------
     oof, priors = {}, {}
@@ -192,17 +258,13 @@ def main():
         oof[mid], priors[mid] = sym_proba(booster, data[mid]), prior
         print("fold {} trained+predicted in {:.0f}s".format(mid, time.time() - t), flush=True)
 
-    # ---- every grid config decoded on every match (OOF probs) ---------------------------
-    grid_scores = {}
-    for mid in args.matches:
-        t = time.time()
-        d = data[mid]
-        blocks = [tuple(int(v) for v in b) for b in d["blocks"]]
-        labs, cfgs = grid_labels(oof[mid], priors[mid], blocks, len(d["gt"]))
-        grid_scores[mid] = np.array([metrics.evaluate(d["gt"], l)["spell_f1"] for l in labs])
-        grid_labels_cache = labs
-        data[mid]["_grid"] = grid_labels_cache
-        print("grid decoded on {} in {:.0f}s".format(mid, time.time() - t), flush=True)
+    # ---- every grid config decoded on every match (OOF probs), in parallel ---------------
+    t = time.time()
+    jobs = {mid: (oof[mid], priors[mid], [tuple(int(v) for v in b) for b in data[mid]["blocks"]],
+                  data[mid]["gt"]) for mid in args.matches}
+    grid_scores, cfgs = grid_scores_parallel(jobs, args.chunks)
+    print("grid of {} configs scored on {} matches in {:.0f}s".format(
+        len(cfgs), len(args.matches), time.time() - t), flush=True)
 
     # ---- per held-out match: nested choice of HMM params, all methods scored -------------
     rows = {}
@@ -222,8 +284,12 @@ def main():
         preds["handHMM"] = hand_pred(d, None)
         preds["handHMM_dead=train"] = hand_pred(d, train_dead)
         preds["lgbm_argmax"] = np.where(graded, model.LETTERS[oof[mid].argmax(axis=1)], "X")
-        preds["lgbm+HMM"] = d["_grid"][best]
+        blocks = [tuple(int(v) for v in b) for b in d["blocks"]]
+        preds["lgbm+HMM"] = grid_labels(oof[mid], priors[mid], blocks, len(gt), [cfgs[best]])[0][0]
         rows[mid] = {k: metrics.evaluate(gt, v) for k, v in preds.items()}
+        if args.absorb > 0:
+            r = metrics.evaluate(d["gt_raw"], preds["lgbm+HMM"])
+            print("  [lgbm+HMM vs RAW DFL labels: spellF1 {:.3f}]".format(r["spell_f1"]))
         print("\n{}  (gt spells {}, mean {:.1f}s; HMM params {})".format(
             mid, rows[mid]["handHMM"]["n_gt"], rows[mid]["handHMM"]["gt_mean_s"], chosen[mid]))
         for k, r in rows[mid].items():
@@ -243,9 +309,8 @@ def main():
         consensus = cfgs[int(np.argmax(np.mean([grid_scores[m] for m in args.matches], axis=0)))]
         os.makedirs(os.path.dirname(os.path.abspath(args.save)), exist_ok=True)
         booster.save_model(args.save)
-        meta = dict(prior=prior.tolist(), hmm=consensus,
+        meta = dict(prior=prior.tolist(), hmm=consensus, absorb_s=args.absorb,
                     features=[str(x) for x in data[args.matches[0]]["names"]])
-        import json
         with open(args.save + ".json", "w") as fh:
             json.dump(meta, fh, indent=1)
         print("saved", args.save, "with HMM params", consensus)
