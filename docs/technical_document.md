@@ -170,6 +170,14 @@ that, the remaining gains came from the classifier, not the decoder.
 
 Requirements: Python 3.12 and the match data bundle. A GPU is not needed.
 
+**The match data is not in our repository, on purpose.** Our submission was produced by running
+this pipeline on the real Barcelona vs Athletic Club match data. RULES.md forbids redistributing
+that data or publishing derived data that would reconstruct it, and the repository is public. So
+`.gitignore` excludes `data/`, the video, the tracking files, the parse cache (`.cache/`) and our
+output CSVs (`outputs/`). Anyone with an enrolled copy of the data can rebuild the submission with
+the commands below. `python tools/run_on_real_data.py --team-name [TEAM NAME]` does the same in one
+step, and also scores the 5 public minutes as a frame-alignment check.
+
 ```bash
 git clone [public repo URL] && cd [repo]
 python3.12 -m venv .venv
