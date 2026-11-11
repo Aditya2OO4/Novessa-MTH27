@@ -66,3 +66,7 @@ env/
 # solution outputs and derived caches (derived match data: never commit)
 .cache/
 outputs/
+
+# match data must never be committed, wherever it lands (not only data/)
+BAR-ATH_*
+*.mp4
