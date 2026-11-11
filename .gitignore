@@ -62,3 +62,7 @@ __pycache__/
 venv/
 env/
 .DS_Store
+
+# solution outputs and derived caches (derived match data: never commit)
+.cache/
+outputs/
