@@ -141,11 +141,13 @@ that, the remaining gains came from the classifier, not the decoder.
 
 ## 7. On the challenge match
 
-[TO FILL after the real run. Only sanity numbers, never a score.]
+We ran the pipeline above on the full match once and submitted that output unchanged. These are
+sanity numbers only, never a score.
 
 - Graded frames labelled H / A / D: [ ] / [ ] / [ ]
-- Number of possessions and mean duration: [ ]
-- Validator result: [Valid]
+- Number of possessions and mean duration: 281 possessions, mean 13.1 s (the public window has 17
+  possessions with a mean of 14.2 s, so the length is plausible)
+- Validator result: Valid (199,319 rows, one per tactical-video frame)
 - Public 5-minute window, used to check the pipeline only: [scoreboard line]
 
 ---
