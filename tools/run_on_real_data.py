@@ -25,6 +25,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--team-name", required=True)
     ap.add_argument("--no-tagging", action="store_true")
+    ap.add_argument("--hand-set", action="store_true",
+                    help="use the older hand-set HMM pipeline instead of the learned model")
     args = ap.parse_args()
 
     from games import GAME, require
@@ -40,7 +42,10 @@ def main():
     print("\n== 3. build submission ==")
     from solution import make_submission
     out_dir = os.path.join(ROOT, "outputs")
-    path = make_submission.run(args.team_name, out_dir, None, not args.no_tagging)
+    model_path = None if args.hand_set else make_submission.DEFAULT_MODEL
+    print("model:", model_path or "hand-set HMM")
+    path = make_submission.run(args.team_name, out_dir, None, not args.no_tagging,
+                               model_path=model_path)
 
     print("\n== 4. frame-alignment check on the public 5 minutes (do NOT tune on this) ==")
     results = os.path.join(ROOT, "evaluation", "results")

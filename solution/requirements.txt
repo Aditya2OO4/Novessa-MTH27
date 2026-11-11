@@ -1,10 +1,20 @@
-# Everything the evaluation needs. Deliberately two lines.
-#
-# The scorer is dependency-light on purpose: no sklearn, no torch, nothing that pins a Python
-# version. It runs under 3.8 and 3.11 alike and produces identical output, so "it scored
-# differently on my machine" is not a conversation anyone has to have.
-#
-# Optional tooling -- the ATD loader and anything that opens the video -- lives in
-# requirements-starter.txt.
-numpy
-pandas
+lightgbm==4.7.0
+    # via -r solution/requirements.in
+narwhals==2.28.0
+    # via lightgbm
+numpy==2.5.4
+    # via
+    #   -r solution/requirements.in
+    #   lightgbm
+    #   pandas
+    #   scipy
+pandas==3.1.1
+    # via -r solution/requirements.in
+python-dateutil==4.0.0
+    # via pandas
+scipy==1.18.1
+    # via lightgbm
+tzdata==2026.6
+    # via
+    #   pandas
+    #   python-dateutil

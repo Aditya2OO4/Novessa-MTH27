@@ -20,6 +20,9 @@ from games import GAME, GAMES, require, source_frames  # noqa: E402
 from starter.baseline import team_of_each_track, team_names, write_submission  # noqa: E402
 from solution import atd, features, model  # noqa: E402
 
+# The submission model: LightGBM trained on other matches only (dev/train.py) + sticky HMM.
+DEFAULT_MODEL = os.path.join(ROOT, "models", "lgbm.txt")
+
 
 def set_piece_mask(n_frames, game, data_dir):
     """Boolean mask of frames inside a Smart Tagging SET PIECES interval (None if unavailable)."""
@@ -57,7 +60,7 @@ def run(team_name, out_dir, data_dir=None, use_tagging=True, cache_dir=None, mod
         from solution import learned
         with open(model_path + ".json") as fh:
             meta = json.load(fh)
-        booster = lgb.Booster(model_file=model_path)
+        booster = learned.load_booster(model_path)
         period = np.zeros(n_frames, dtype=np.int8)
         for half, first, last, _live in cfg.blocks:
             period[first:last + 1] = half
@@ -94,7 +97,10 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=os.path.join(ROOT, "outputs"))
     ap.add_argument("--data-dir", default=None)
     ap.add_argument("--no-tagging", action="store_true")
-    ap.add_argument("--model", default=None,
-                    help="LightGBM booster from dev/train.py --save (default: hand-set pipeline)")
+    ap.add_argument("--model", default=DEFAULT_MODEL,
+                    help="LightGBM booster from dev/train.py --save (default: %(default)s)")
+    ap.add_argument("--hand-set", action="store_true",
+                    help="use the older hand-set HMM pipeline instead of the learned model")
     args = ap.parse_args()
-    run(args.team_name, args.out, args.data_dir, not args.no_tagging, model_path=args.model)
+    run(args.team_name, args.out, args.data_dir, not args.no_tagging,
+        model_path=None if args.hand_set else args.model)

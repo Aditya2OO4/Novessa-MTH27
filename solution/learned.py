@@ -174,6 +174,17 @@ def compute_features(players, ball, slot_team, period, pitch=(105.0, 68.0), max_
 
 
 # ---------------------------------------------------------------- inference + HMM
+def load_booster(path):
+    """Load a LightGBM text model whatever its line endings.
+
+    LightGBM's file parser rejects CRLF, which a Windows git checkout (core.autocrlf) produces.
+    Reading in text mode normalises newlines, so the model is identical on every OS.
+    """
+    import lightgbm as lgb
+    with open(path, "r", encoding="ascii") as fh:
+        return lgb.Booster(model_str=fh.read())
+
+
 def predict_proba(booster, players, ball, slot_team, period, pitch):
     """(N, 3) probabilities [H, A, D], averaged with the home/away-mirrored prediction so the
     model has no home bias (it was trained with swap augmentation)."""

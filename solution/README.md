@@ -1,13 +1,20 @@
 # Possession pipeline (HMM)
 
 Drop-in folder for your fork of the starter repo (it imports `games.py` and `starter/` from the
-repo root). Python 3.8+, `numpy` + `pandas` only.
+repo root). **Python 3.12**, dependencies pinned exactly in `requirements.txt` (generated from
+`requirements.in` with `uv pip compile`).
 
 ```bash
-pip install -r requirements.txt
-python tests/test_smoke.py                              # synthetic data, no match data needed
-python -m solution.make_submission --team-name YourTeam # needs data/ unpacked
+python3.12 -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r solution/requirements.txt
+python tests/test_submission_model.py                   # committed model loads, deterministic
+python -m solution.make_submission --team-name YourTeam # needs the match data (MTAH_DATA_DIR)
 ```
+
+The default is the learned model, `models/lgbm.txt`: LightGBM trained on other matches only, plus
+the sticky HMM. `--hand-set` runs the older hand-set pipeline described below instead.
+`.gitattributes` keeps `models/` byte-identical on every OS. A CRLF checkout would make LightGBM
+reject the model.
 
 Writes `outputs/YourTeam.csv` and runs the official validator on it. First run parses the tracking
 (~1-2 min) and caches it in `.cache/` (derived match data, gitignored: never commit or upload it).
