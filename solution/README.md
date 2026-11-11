@@ -11,8 +11,13 @@ python tests/test_submission_model.py                   # committed model loads,
 python -m solution.make_submission --team-name YourTeam # needs the match data (MTAH_DATA_DIR)
 ```
 
-The default is the learned model, `models/lgbm.txt`: LightGBM trained on other matches only, plus
-the sticky HMM. `--hand-set` runs the older hand-set pipeline described below instead.
+The default model is `models/gru.pt`: a bidirectional GRU trained on other matches only (public
+IDSSE Bundesliga data, `dev/seq.py`), followed by the sticky HMM. It runs on the CPU and is
+deterministic, so no GPU is needed. `--model models/lgbm.txt` runs the earlier LightGBM model, and
+`--hand-set` runs the hand-set pipeline described below. Comparison: `dev/RESULTS.md`.
+
+On Linux, `pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu` avoids
+downloading the CUDA libraries. Inference only uses the CPU either way.
 `.gitattributes` keeps `models/` byte-identical on every OS. A CRLF checkout would make LightGBM
 reject the model.
 

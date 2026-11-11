@@ -20,8 +20,9 @@ from games import GAME, GAMES, require, source_frames  # noqa: E402
 from starter.baseline import team_of_each_track, team_names, write_submission  # noqa: E402
 from solution import atd, features, model  # noqa: E402
 
-# The submission model: LightGBM trained on other matches only (dev/train.py) + sticky HMM.
-DEFAULT_MODEL = os.path.join(ROOT, "models", "lgbm.txt")
+# The submission model: BiGRU trained on other matches only (dev/seq.py) + sticky HMM.
+# models/lgbm.txt (LightGBM, dev/train.py) remains available via --model.
+DEFAULT_MODEL = os.path.join(ROOT, "models", "gru.pt")
 
 
 def set_piece_mask(n_frames, game, data_dir):
@@ -54,17 +55,27 @@ def run(team_name, out_dir, data_dir=None, use_tagging=True, cache_dir=None, mod
         graded[live_from:last + 1] = True
 
     if model_path:
-        # learned classifier (trained on other matches only, dev/train.py) + sticky HMM
-        import json
-        import lightgbm as lgb
+        # learned classifier (trained on other matches only) + sticky HMM
         from solution import learned
-        with open(model_path + ".json") as fh:
-            meta = json.load(fh)
-        booster = learned.load_booster(model_path)
         period = np.zeros(n_frames, dtype=np.int8)
         for half, first, last, _live in cfg.blocks:
             period[first:last + 1] = half
-        proba = learned.predict_proba(booster, players, ball, team_of_track, period, cfg.pitch)
+        if model_path.endswith(".pt"):
+            # BiGRU sequence model (dev/seq.py), deterministic CPU inference
+            from solution import sequence
+            net, norm, meta = sequence.load(model_path)
+            spans = [(first, last) for _h, first, last, _live in cfg.blocks]
+            proba, names = sequence.predict_proba(net, norm, players, ball, team_of_track, period,
+                                                  cfg.pitch, spans)
+            assert names == meta["features"], "features differ from the ones the model was trained on"
+        else:
+            # LightGBM per-frame classifier (dev/train.py)
+            import json
+            with open(model_path + ".json") as fh:
+                meta = json.load(fh)
+            booster = learned.load_booster(model_path)
+            proba = learned.predict_proba(booster, players, ball, team_of_track, period, cfg.pitch)
+        print("model:", os.path.basename(model_path))
         hmm = meta["hmm"]
         cfg.emission_weight = hmm["w"]
         cfg.p_turnover, cfg.p_enter_dead, cfg.p_leave_dead = (

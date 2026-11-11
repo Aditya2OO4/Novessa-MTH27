@@ -3,3 +3,4 @@
 numpy
 pandas
 lightgbm
+torch==2.11.0  # the version models/gru.pt was trained and verified with

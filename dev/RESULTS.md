@@ -65,3 +65,26 @@ above (lgbm+HMM 0.519 vs 0.518).
   public ground truth (inspected for its definition, as CHALLENGE.md invites; not used to tune
   anything) contains a 0.76 s and a 1.32 s home spell inside away possessions. The organisers'
   definition keeps brief controlled spells, so `--absorb` stays at 0.
+
+## Sequence model, 2026-11-11 (now the submission default)
+
+`dev/seq.py`: a 2-layer bidirectional GRU (`solution/sequence.py`, ~150k parameters) reads 40 s
+windows of the same 78 per-frame features and outputs H/A/D probabilities. These go into the same
+sticky HMM. Trained with home/away swap augmentation on an RTX 5070 laptop GPU, about 50 s per
+fold. Same leave-one-match-out protocol, with HMM parameters nested.
+
+| method (through the HMM) | spellF1 | macroF1 |
+|---|---|---|
+| LightGBM (previous default) | 0.526 (0.055) | 0.884 (0.018) |
+| **BiGRU** | **0.598 (0.039)** | **0.900 (0.011)** |
+| mean of the two | 0.601 (0.041) | 0.905 (0.012) |
+
+The BiGRU beats LightGBM on all 7 held-out matches, by +0.04 to +0.13 each and +0.072 on average,
+well past the ~0.04 noise band. Averaging the two adds nothing measurable, so the GRU alone is
+shipped. Regenerate with `python -m dev.seq --no-lgbm --save models/gru.pt`. A rerun gave 0.596
+(seed variance).
+
+**Submission inference runs on the CPU** with deterministic kernels and 4 threads: about 25 s for
+the full match, with byte-identical output on repeat runs (`tests/test_submission_model.py`). No GPU
+is needed to reproduce the file. On a real IDSSE match, the submission code path computes features
+identical to the training cache.
