@@ -24,6 +24,20 @@ reject the model.
 Writes `outputs/YourTeam.csv` and runs the official validator on it. First run parses the tracking
 (~1-2 min) and caches it in `.cache/` (derived match data, gitignored: never commit or upload it).
 
+## Match data is not in this repository (on purpose)
+Our submission was produced by running this pipeline on the real BAR-ATH match data. That data is
+not committed. RULES.md ("The data") forbids redistributing it or publishing derived data that would
+reconstruct it, and this repository is public. So `.gitignore` excludes `data/`, the video
+(`*.mp4`), the tracking containers, the parse cache (`.cache/`) and our outputs (`outputs/`).
+
+To reproduce our submission with your own enrolled copy of the data:
+```bash
+# unpack the match files into data/ (or point MTAH_DATA_DIR at them), then:
+python tools/run_on_real_data.py --team-name YourTeam
+```
+This checks the files exist, builds `outputs/YourTeam.csv` (199,319 rows, one per tactical-video
+frame), runs the official validator, and scores the 5 public minutes as a frame-alignment check.
+
 ## How it works
 1. **Parse** tracking, convert to metres, interpolate ball gaps <= 1 s.
 2. **Team evidence**: log-odds that home has the ball from how much closer the nearest home player
