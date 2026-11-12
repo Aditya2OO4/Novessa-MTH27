@@ -1,7 +1,7 @@
-# [TEAM NAME]: Ball Possession, Technical Document
+# Novessa: Ball Possession, Technical Document
 
 More than a Hack 2027, Phase 1 (Initial Challenge)
-Team: [members] · Repository: [public repo URL]
+Team: Novessa (Vivan, Vishit, Aditya) · Repository: https://github.com/Aditya2OO4/Novessa-MTH27
 
 ---
 
@@ -19,15 +19,21 @@ stages:
    decoding turns those probabilities into a small number of long, clean possessions, which is
    what the ranking metric (spellF1) rewards.
 
-The classifier is trained **only on other matches**: 7 public Bundesliga matches whose
-per-frame possession and ball-status labels come from the official league data feed. We
-deliberately degrade those matches to look like the challenge tracking. Nothing is labelled by
-hand, and nothing is fitted on the provided match.
+**What was and was not used for learning.**
+
+- No frame was labelled by hand, by anyone, on any match.
+- Nothing from the provided match (Barcelona vs Athletic Club) was used to train or tune anything.
+- All training and tuning used external public data: 7 Bundesliga matches from the IDSSE / Sportec
+  open dataset (CC BY 4.0, Bassek et al., 2025, full citation in Section 4). Their per-frame labels
+  come from the league's own data feed. We degrade the tracking so it looks like the challenge
+  tracking.
+- The public 5-minute ground truth was used only to check that our pipeline is aligned and
+  well-formed, and to understand the possession definition.
 
 On the 7 public matches, each one held out in turn, the pipeline scores **spellF1 0.598 /
-macroF1 0.900**. A re-implementation of the organisers' nearest-player baseline scores
-spellF1 0.178 on the same matches. These are not scores on the challenge match, which is noisier
-(see Limitations).
+macroF1 0.900**. The organisers' nearest-player baseline (2 s smoothing) scores spellF1 0.178 on
+the same degraded matches. These are not scores on the challenge match, which is noisier (see
+Limitations).
 
 ---
 
@@ -47,10 +53,11 @@ factor of five while macroF1 hardly moves.
   stoppage "expensive", so isolated noisy frames cannot split a possession in two. Viterbi
   decoding gives the single most likely sequence of H / A / D for each half.
 
-**Why we chose the GRU.** We compared three classifiers under the same protocol (Section 6). The
-GRU beat a LightGBM per-frame classifier on every one of the 7 held-out matches (spellF1 0.598 vs
-0.526, about 0.07 above the 0.04 noise band). Averaging the two added nothing measurable, so we
-ship the GRU alone.
+**Why we chose the GRU.** We compared it with a LightGBM per-frame classifier under the same
+protocol (Section 6). The GRU won on every one of the 7 held-out matches, by +0.04 to +0.13
+spellF1 (0.598 vs 0.526 on average; differences below about 0.04 are noise). Averaging the two
+added nothing measurable, so we ship the GRU alone. The network is small: 2 bidirectional layers,
+about 150k parameters.
 
 **Symmetry.** Every prediction is averaged with the prediction for the same frame with home and
 away swapped, and training uses the same swap as augmentation. The model therefore has no built-in
@@ -62,12 +69,12 @@ preference for either team.
 
 | Asset | Used? | How / why not |
 |---|---|---|
-| Tactical automatic tracking (ATD), players + ball | **Yes, the only input** | Positions and speeds of every slot and the ball, converted to metres. Slot team comes from the metadata. Slot index and identity are never used, because they switch. |
+| Tactical automatic tracking (ATD), players + ball | **Yes, the only input** | Positions and speeds of every slot and the ball, converted to metres. Ball gaps up to 1 s are interpolated. Slot team comes from the metadata. Slot index and identity are never used, because they switch. |
 | Smart Tagging | No (in the shipped model) | Used only by an earlier hand-set version (set-piece intervals as dead-ball evidence). The learned model does not need it, and its throw-ins carry no team tag. |
 | Homography | No | Only needed to go between pixels and the pitch. We work on the pitch only. |
-| Tactical / broadcast video | No | Detecting the ball from video could fill the 41% gaps, but we judged it out of scope for the time available. |
-| Broadcast tracking | No | Not synchronised to the tactical video, and a third of its frames have no usable homography. |
-| Public 5-minute ground truth | Only to check the pipeline | Used to check frame alignment and file format, and once to read how short possessions are labelled (Section 5). **Never used for training, tuning or choosing between versions.** |
+| Tactical / broadcast video | No | Detecting the ball from video could fill the gaps in the ball track, but we did not have time to build it. |
+| Broadcast tracking | No | Not frame-aligned to the tactical video, and a third of its frames have no usable homography. |
+| Public 5-minute ground truth | Only to check the pipeline and read the definition | Used to check frame alignment and file format, and to see how the possession definition is applied (Section 5). **Not used for training, and no model, threshold or setting was chosen by scoring against it.** |
 
 ---
 
@@ -76,10 +83,11 @@ preference for either team.
 | Dataset | Source | Labels: who produced them | Amount |
 |---|---|---|---|
 | IDSSE / Sportec open Bundesliga data | Bassek, Rein, Weber et al., *"An integrated dataset of spatiotemporal and event data in elite soccer"*, Scientific Data 12, 195 (2025). Licence CC BY 4.0. Mirror: `huggingface.co/datasets/pysport/idsse-data` | The official DFL data feed's per-frame `BallPossession` and `BallStatus` fields, recorded by the league's data provider. **Not labelled by our team.** | 7 matches (IDs J03WMX, J03WN1, J03WOH, J03WOY, J03WPY, J03WQQ, J03WR9), 25 fps |
-| Metrica Sports sample data (game 3) | `github.com/metrica-sports/sample-data` | Labels derived automatically from its event data | 1 match, used only as an extra check, not for training |
 
 **No data about the provided match (Barcelona vs Athletic Club) was used for training or
-validation.** No human at our team labelled any frame of any match.
+validation.** No one in our team labelled any frame of any match. The repository also has an
+optional script, `tests/external_eval.py`, that can score on Metrica's public sample game; we
+report no numbers from it and it plays no part in the submission.
 
 **Labels per frame:** `D` where `BallStatus = 0` (ball dead), otherwise `H` / `A` from
 `BallPossession`.
@@ -88,7 +96,7 @@ validation.** No human at our team labelled any frame of any match.
 is clean and the challenge tracking is not, so each training match is degraded:
 
 - **Ball:** removed on 41% of frames, in bursts of 0.2 to 16 s, plus 0.3 m position noise.
-- **Players:** position and speed noise, and short dropouts.
+- **Players:** 0.3 m position noise, speed noise, and short dropouts (about 3% of frames).
 - **Slots:** players spread over 46 anonymous slots with track breaks (about every 60 s), 3%
   cross-team identity swaps and occasional duplicated tracks.
 
@@ -103,17 +111,18 @@ is clean and the challenge tracking is not, so each training match is degraded:
 - **Loose balls and challenges.** We have no separate "contested" state. A possession continues
   until the evidence for the other team is strong enough to beat the decoder's switching cost, so
   a single touch or deflection does not normally change possession.
-- **Short possessions are allowed.** We considered removing all opposition spells shorter than
-  2 s from the training labels, to model "touches without control do not count". The public
-  ground truth, however, contains genuine possessions of 0.76 s and 1.32 s, so we kept the labels
-  as they are.
+- **Short possessions are allowed.** We considered removing opposition spells shorter than 2 s
+  from the training labels, to model "touches without control do not count". While reading the
+  public ground truth to understand the definition, we saw home possessions of 0.76 s and 1.32 s
+  inside away possessions, so we kept the labels as they are. This is the only decision the public
+  ground truth influenced; it was not used to pick any parameter or model.
 - **Restarts.** Dead-ball periods are learned from the `BallStatus` labels: players slowing down,
   the ball still or leaving the pitch, team shape. A possession that follows a stoppage starts
   fresh. We do not try to say who "owns" a dead ball (the challenge asks for `D`).
-- **Ball not tracked.** We do not invent a ball position. The classifier uses team shape and
-  movement, how long ago the ball was last seen and who was closest then and when it reappears.
-  The decoder then keeps the current possession through the gap unless the evidence says
-  otherwise.
+- **Ball not tracked.** Gaps of up to 1 s are interpolated; longer gaps are left empty. For those
+  the classifier uses team shape and movement, how long ago the ball was last seen, and who was
+  closest to it just before and just after the gap. The decoder keeps the current possession
+  through the gap unless the evidence says otherwise.
 
 ---
 
@@ -127,15 +136,17 @@ matches, with **leave-one-match-out**:
   match.
 - Scores use the organisers' official `evaluation/possession_metrics.py`.
 
-| Method (all through the same decoder) | spellF1 (sd) | macroF1 (sd) |
+| Method | spellF1 (sd) | macroF1 (sd) |
 |---|---|---|
-| Nearest player + 2 s smoothing (organisers' baseline, re-implemented) | 0.178 (0.014) | 0.426 (0.020) |
-| Hand-set rules + HMM (first version) | 0.252 (0.028) | 0.723 (0.023) |
+| Nearest player + 2 s smoothing (organisers' baseline smoother, no decoder) | 0.178 (0.014) | 0.426 (0.020) |
+| Hand-set rules + HMM (our first version, no learning) | 0.252 (0.028) | 0.723 (0.023) |
 | LightGBM per frame + HMM | 0.526 (0.055) | 0.884 (0.018) |
 | **BiGRU + HMM (submitted)** | **0.598 (0.039)** | **0.900 (0.011)** |
 
-Searching the decoder's settings more widely did not help (0.519 to 0.526, within noise). After
-that, the remaining gains came from the classifier, not the decoder.
+The rows with an HMM use the same decoder. For LightGBM, searching the decoder's settings more
+widely did not help (0.519 to 0.526, within noise), so the remaining gains came from the
+classifier, not the decoder. Numbers are from `dev/RESULTS.md`; Section 9 gives the commands that
+regenerate them.
 
 ---
 
@@ -154,6 +165,11 @@ sanity numbers only, never a score.
 
 ## 8. Limitations, and what we would do with more time
 
+- **Dead-ball detection is our weakest part.** Recognising when the ball is out of play, and when
+  play restarts, relies on indirect signs (players slowing, the ball still or off the pitch). Short
+  stoppages, quick restarts and stoppages in crowded areas are easy to miss or to mislabel, and a
+  wrong or missed `D` can split or merge possessions, which spellF1 punishes. Restart detection is
+  the part we worked on least, and the first thing we would improve.
 - **Different possession definition.** Our labels come from the Bundesliga feed, while the
   challenge ground truth comes from Metrica's corrected tracking. The two may disagree on borderline
   cases (deflections, aerial duels, very short spells).
@@ -177,21 +193,21 @@ this pipeline on the real Barcelona vs Athletic Club match data. RULES.md forbid
 that data or publishing derived data that would reconstruct it, and the repository is public. So
 `.gitignore` excludes `data/`, the video, the tracking files, the parse cache (`.cache/`) and our
 output CSVs (`outputs/`). Anyone with an enrolled copy of the data can rebuild the submission with
-the commands below. `python tools/run_on_real_data.py --team-name [TEAM NAME]` does the same in one
+the commands below. `python tools/run_on_real_data.py --team-name Novessa` does the same in one
 step, and also scores the 5 public minutes as a frame-alignment check.
 
 ```bash
-git clone [public repo URL] && cd [repo]
+git clone https://github.com/Aditya2OO4/Novessa-MTH27 && cd Novessa-MTH27
 python3.12 -m venv .venv
 . .venv/bin/activate                        # Windows: .venv\Scripts\activate
 pip install -r solution/requirements.txt    # exact pinned versions
 # Linux, optional: install torch==2.11.0 from https://download.pytorch.org/whl/cpu to skip the CUDA download
 
 export MTAH_DATA_DIR=/path/to/data          # folder holding tactical/ and broadcast/
-python -m solution.make_submission --team-name [TEAM NAME]
+python -m solution.make_submission --team-name Novessa
 ```
 
-This writes `outputs/[TEAM NAME].csv` and runs the official validator on it. Inference runs on the
+This writes `outputs/Novessa.csv` and runs the official validator on it. Inference runs on the
 CPU with deterministic settings, and running it twice gives a byte-identical file.
 `python tests/test_submission_model.py` checks this without the match data.
 
@@ -200,7 +216,7 @@ CPU with deterministic settings, and running it twice gives a byte-identical fil
 ```bash
 pip install -r dev/requirements-dev.txt
 python -m dev.train                               # builds the feature cache, LightGBM comparison
-python -m dev.seq --no-lgbm --save models/gru.pt  # sequence model (about 10 min on a laptop GPU)
+python -m dev.seq --no-lgbm --save models/gru.pt  # sequence model (minutes on a GPU, slower on CPU)
 ```
 
 **Main files:**
@@ -211,5 +227,5 @@ python -m dev.seq --no-lgbm --save models/gru.pt  # sequence model (about 10 min
 - `solution/make_submission.py`: builds the CSV.
 - `dev/`: training and evaluation on public data.
 
-**Open-source software:** NumPy, pandas, PyTorch, LightGBM, kloppy (Metrica sample loading),
-lxml. Data: IDSSE / Sportec Open Data (CC BY 4.0).
+**Open-source software:** NumPy, pandas, PyTorch, LightGBM, lxml (reads the Bundesliga files);
+kloppy only for the optional external check. Data: IDSSE / Sportec Open Data (CC BY 4.0).
