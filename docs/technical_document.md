@@ -21,7 +21,7 @@ stages:
 
 **What was and was not used for learning.**
 
-- No frame was labelled by hand, by anyone, on any match.
+- We labelled no frame by hand, on any match, and we corrected nothing by hand.
 - Nothing from the provided match (Barcelona vs Athletic Club) was used to train or tune anything.
 - All training and tuning used external public data: 7 Bundesliga matches from the IDSSE / Sportec
   open dataset (CC BY 4.0, Bassek et al., 2025, full citation in Section 4). Their per-frame labels
@@ -41,14 +41,16 @@ Limitations).
 
 **Why not just "nearest player to the ball"?** The ball is missing on 41% of graded frames, and
 frame-by-frame decisions flicker. Each flicker creates a fake possession, and spellF1 punishes
-fake possessions heavily. The organisers' own baseline shows this: smoothing changes spellF1 by a
-factor of five while macroF1 hardly moves.
+fake possessions heavily. The organisers' own baseline shows this: on our degraded test matches,
+smoothing the nearest-player rule over 2 s lifts spellF1 from 0.019 to 0.178 (about nine times)
+while macroF1 hardly moves (0.418 to 0.426).
 
 **So we treat possession as a sequence problem**, in two layers:
 
-- **The classifier sees context, not single frames.** It reads a 40-second window, so it can use
-  what happened before and after a gap in the ball tracking (for example, which team moves
-  forward, or who is closest when the ball reappears).
+- **The classifier sees context, not single frames.** It is trained on 40-second windows, and at
+  inference it slides along each half with 20 seconds of context either side of every frame. So
+  it can use what happened before and after a gap in the ball tracking (for example, which team
+  moves forward, or who is closest when the ball reappears).
 - **The decoder enforces a sensible structure.** The HMM makes switching possession or entering a
   stoppage "expensive", so isolated noisy frames cannot split a possession in two. Viterbi
   decoding gives the single most likely sequence of H / A / D for each half.
@@ -90,15 +92,16 @@ optional script, `tests/external_eval.py`, that can score on Metrica's public sa
 report no numbers from it and it plays no part in the submission.
 
 **Labels per frame:** `D` where `BallStatus = 0` (ball dead), otherwise `H` / `A` from
-`BallPossession`.
+`BallPossession`. Referees are excluded from the tracking.
 
 **Making the clean data look like the challenge data** (`dev/degrade.py`). The Bundesliga tracking
 is clean and the challenge tracking is not, so each training match is degraded:
 
 - **Ball:** removed on 41% of frames, in bursts of 0.2 to 16 s, plus 0.3 m position noise.
 - **Players:** 0.3 m position noise, speed noise, and short dropouts (about 3% of frames).
-- **Slots:** players spread over 46 anonymous slots with track breaks (about every 60 s), 3%
-  cross-team identity swaps and occasional duplicated tracks.
+- **Slots:** players spread over 46 anonymous slots with track breaks (on average every 60 s),
+  3% of track segments placed on the other team's slot (identity swaps), and about one duplicated
+  track per minute.
 
 ---
 
@@ -139,7 +142,7 @@ matches, with **leave-one-match-out**:
 | Method | spellF1 (sd) | macroF1 (sd) |
 |---|---|---|
 | Nearest player + 2 s smoothing (organisers' baseline smoother, no decoder) | 0.178 (0.014) | 0.426 (0.020) |
-| Hand-set rules + HMM (our first version, no learning) | 0.252 (0.028) | 0.723 (0.023) |
+| Hand-set rules + HMM (our first version; only its dead-ball share comes from the training matches) | 0.252 (0.028) | 0.723 (0.023) |
 | LightGBM per frame + HMM | 0.526 (0.055) | 0.884 (0.018) |
 | **BiGRU + HMM (submitted)** | **0.598 (0.039)** | **0.900 (0.011)** |
 
@@ -147,6 +150,13 @@ The rows with an HMM use the same decoder. For LightGBM, searching the decoder's
 widely did not help (0.519 to 0.526, within noise), so the remaining gains came from the
 classifier, not the decoder. Numbers are from `dev/RESULTS.md`; Section 9 gives the commands that
 regenerate them.
+
+**The submitted model.** After this comparison we trained the GRU once on all 7 public matches. Its
+decoder settings and class prior are the best average over the 7 held-out results, again from
+public data only. The older hand-set version has a default prior of about 20% dead-ball frames,
+close to the share in the public 5-minute window. That version is not what we submitted, and the
+submitted model does not use that number: its dead-ball share is learned from the training
+matches.
 
 ---
 
@@ -172,7 +182,10 @@ sanity numbers only, never a score.
   the part we worked on least, and the first thing we would improve.
 - **Different possession definition.** Our labels come from the Bundesliga feed, while the
   challenge ground truth comes from Metrica's corrected tracking. The two may disagree on borderline
-  cases (deflections, aerial duels, very short spells).
+  cases (deflections, aerial duels, very short spells). Bundesliga possessions average 5.5 to 9.2 s
+  in our training matches, against 14.2 s in the public window, so our decoder may split
+  possessions more than the organisers' definition does. Its settings also sit at the edge of the
+  range we searched, and widening the search did not change the score.
 - **Simulated noise is not the real noise.** We remove the ball at random times, while in the real
   data it goes missing mostly in crowded moments (boxes, duels, tackles). The real match is
   therefore harder than our test, and we expect a lower score on it.
