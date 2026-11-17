@@ -53,7 +53,6 @@ def main():
     subprocess.run([sys.executable, os.path.join(ROOT, "evaluation", "run_evaluation.py")],
                    check=False)
     print("\nDone. Your file: {}".format(path))
-    print("Do not upload yet. See TEAM_PLAN.md for the schedule.")
 
 
 if __name__ == "__main__":
