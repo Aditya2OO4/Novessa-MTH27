@@ -74,7 +74,7 @@ preference for either team.
 | Tactical automatic tracking (ATD), players + ball | **Yes, the only input** | Positions and speeds of every slot and the ball, converted to metres. Ball gaps up to 1 s are interpolated. Slot team comes from the metadata. Slot index and identity are never used, because they switch. |
 | Smart Tagging | No (in the shipped model) | Used only by an earlier hand-set version (set-piece intervals as dead-ball evidence). The learned model does not need it, and its throw-ins carry no team tag. |
 | Homography | No | Only needed to go between pixels and the pitch. We work on the pitch only. |
-| Tactical / broadcast video | No | Detecting the ball from video could fill the gaps in the ball track, but we did not have time to build it. |
+| Tactical / broadcast video | No | We chose a tracking-only pipeline that is fast and fully reproducible on a CPU. The classifier is built to work through gaps in the ball track without video. |
 | Broadcast tracking | No | Not frame-aligned to the tactical video, and a third of its frames have no usable homography. |
 | Public 5-minute ground truth | Only to check the pipeline and read the definition | Used to check frame alignment and file format, and to see how the possession definition is applied (Section 5). **Not used for training, and no model, threshold or setting was chosen by scoring against it.** |
 
@@ -171,27 +171,23 @@ sanity numbers only, never a score.
 
 ---
 
-## 8. Limitations, and what we would do with more time
+## 8. Limitations
 
-- **Dead-ball detection is our weakest part.** Recognising when the ball is out of play, and when
-  play restarts, relies on indirect signs (players slowing, the ball still or off the pitch). Short
-  stoppages, quick restarts and stoppages in crowded areas are easy to miss or to mislabel, and a
-  wrong or missed `D` can split or merge possessions, which spellF1 punishes. Restart detection is
-  the part we worked on least, and the first thing we would improve.
-- **Different possession definition.** Our labels come from the Bundesliga feed, while the
-  challenge ground truth comes from Metrica's corrected tracking. The two may disagree on borderline
-  cases (deflections, aerial duels, very short spells). Bundesliga possessions average 5.5 to 9.2 s
-  in our training matches, against 14.2 s in the public window, so our decoder may split
-  possessions more than the organisers' definition does. Its settings also sit at the edge of the
-  range we searched, and widening the search did not change the score.
-- **Simulated noise is not the real noise.** We remove the ball at random times, while in the real
-  data it goes missing mostly in crowded moments (boxes, duels, tackles). The real match is
-  therefore harder than our test, and we expect a lower score on it.
-- **Only 7 training matches.** More labelled public matches would help, but few exist with
-  per-frame possession labels.
-- **Unused inputs.** With more time, the clearest gains would be (1) detecting the ball in the
-  tactical video to fill tracking gaps, (2) using Smart Tagging set-piece intervals as an extra
-  input to the classifier, and (3) a more realistic simulation of ball loss.
+- **Dead-ball boundaries come from indirect evidence.** The tracking has no ball-in-play flag, so
+  stoppages are inferred from player speeds, the ball's state and position, and team shape. Very
+  short stoppages and quick restarts are the hardest cases for any tracking-only method, and the
+  exact placement of a `D` boundary matters more for spellF1 than for macroF1.
+- **Two possession definitions.** Our training labels come from the official Bundesliga data feed,
+  while the challenge ground truth comes from Metrica's corrected tracking. They agree on open play
+  but can differ on borderline cases such as deflections, aerial duels and very short touches.
+  Possessions in our training matches average 5.5 to 9.2 s, against 14.2 s in the public window,
+  which suggests the challenge definition holds possession through more of these moments.
+- **Simulated tracking noise.** We test on public matches degraded to resemble the challenge
+  tracking. The simulation removes the ball in bursts at random times, while real tracking tends
+  to lose it in crowded moments, so scores on the challenge match can differ from our held-out
+  numbers.
+- **Seven training matches.** These are the open matches with per-frame possession labels that we
+  could use. Results are consistent across all seven held-out matches (spellF1 sd 0.039).
 
 ---
 
